@@ -1,0 +1,96 @@
+# {player} - 玩家原始名称
+# {prefix} - 玩家前缀
+# {suffix} - 玩家后缀
+# {level} - 玩家当前等级. 在levelup中, 能使用到{level}来提示玩家升到了{level}级, 说明levelup中的效果是在升级(等级变更完成)之后实现的.
+# {level_next} - 玩家下一等级
+# {level_last} - 玩家上一等级
+# {xp_tonext} - 玩家升级下一级所需经验(即当前等级升级所需的经验, levelup中xp的计算决定)
+# {xp_next} - 玩家升级下一级还需的经验(升级所需经验减去当前玩家经验)
+# {xp} - 玩家当前经验.
+# 下方所有配置都支持解析占位符，比如 %vault_prefix%
+# 在所有字符串中的 [<type>_] (比如reward里的cmd配置)，代表的意思为:
+# [CMD_] 以玩家身份执行后面的命令; [OPCMD_] 让玩家以管理员身份执行后面的命令; [CONSOLE_] 控制台执行命令
+
+main:
+  level_min: 1 # 最小等级
+  level_max: 100 # 最大等级. 当达到最大等级时, 升级所需经验就会显示为一个文本, 这个文本的内容在下一个参数中配置.
+  max_format: 'MAX' # 必须是字符串. 比如 '999' 'a'. 此行为上方描述的最大等级升级所需经验的显示文本. 在那时, %axp_xp_tonext%的占位符中，返回的也是这个内容.
+  level_normal: 1
+levelup: # 升级配置
+  xp: '1250+750 *({level}-1)' # 每个等级的升级所需经验
+  title: none # 升级显示文本; 若为none则不执行这个title.
+  subtitle: none # 同上
+  sound: none # 升级音效; 为none不播放
+  raw: '&b恭喜你&a{player}&b你升级到了&e&l{level}&r&b级，下一级所需经验为{xp_tonext}' # 升级提示文本; 为none则不提示
+  doreset: false # 升级是否重置玩家经验. false不重置，true会每次升级时把玩家的经验重置为resetxp的值.
+  resetxp: 0 # 重置经验后的经验
+  doremove: true # 升级是否减少玩家经验.
+message:
+  fail: "&c等级不足,无法领取该奖励."
+reward: # 奖励
+  reward1: # 奖励名
+    level: [-2] # 可领取该等级奖励的等级. [1,2,5] 代表当等级为1、2、5时可领取. [-1] 代表全部等级都是该奖励. [-2] 代表除最后1个等级外的所有等级. [-3] 代表除最后2个等级外的所有等级. 以此类推.
+    cmd:
+      - '[CMD_] aerlottry start YYT2025SERVER'
+rmenu: # 等级奖励菜单
+  # 在rmenu中有特定的占位文本. 其特定的占位文本只能在rmenu中使用，其他地方不可用; 而上述的占位文本依旧可以在rmenu中使用. 它们的关系堪比父类与子类的关系.
+  # 有以下特定占位文本:
+  # {item_level} 在当页中某个mainreward物品对应的等级.
+  # {item_statu} 对应的领取状态. 不同状态返回的值可在statu中进行配置.
+  slot: 54 # 打开的等级奖励的菜单
+  name: '等级奖励' # 等级奖励菜单的名字
+  nextpage: # 下一页物品. 如果处于最后一页，则该物品不会被显示
+    slot: 41 # 处于的格子
+    item: STONE_BUTTON
+    name: '下一页'
+    lore: '' # 可以有lore，也可以没有. 没有的时候甚至不用写 lore: 这一行.
+  lastpage: # 上一页物品. 如果处于第一页，则该物品不会被显示
+    slot: 39 # 处于的格子
+    item: STONE_BUTTON
+    name: '上一页'
+    lore: ''
+  close: # 关闭菜单物品.
+    slot: 8 # 处于的格子
+    item: RED_STAINED_GLASS_PANE # 这里只搞了RED, GRAY, BLACK三种颜色
+    name: '&c&l关闭  '
+    lore: ''
+  fills: # 填充物. 也就是mainreward、nextpage、lastpage、close占的格子之外的空格子都会被填充上这个物品.
+    item: GRAY_STAINED_GLASS_PANE
+    name: '&f'
+    lore: '' # 可有可无
+  mainreward: # 等级奖励物品配置
+    slot: [10,11,12,13,14,15,16,19,20,21,22,23,24,25,28,29,30,31,32,33,34] # 占的格子. 对应的是等级, 比如第一页的第10号格子 也就是第一个等级 对应 1级；第二页的 第20号格子 也就是 21+9 即第30个等级 对应30级. (21+9的意思是，每一页共有21个物品来领取等级奖励，第一页共对应到了21级，于是第二页从头开始对应的就要+21级.)
+    name: '&7&l等级奖励&r&f-&a&llv{item_level}' # 物品显示的名字.
+    lore:
+      - '&f'
+      - '&7+ &e&l1 &r&e次神秘宝箱抽奖'
+      - '&f'
+      - '{item_statu}'
+    item: MILK_BUCKET # 默认的物品类型
+    click: BUCKET # 点击后变成的物品类型
+    can_claim:
+      item: MILK_BUCKET # 可领取的物品类型
+      glow: true # 是否有附魔光泽
+      lore:  # 可领取时更改该物品的lore为这个
+        - '&7耐久I'
+        - '&f'
+        - '&7+ &e&l1 &r&e次神秘宝箱抽奖'
+        - '&f'
+        - '{item_statu}'
+    claimed: 
+      item: BUCKET # 领取过的物品类型
+      glow: false # 是否有附魔光泽
+      lore:  # 领取过的更改该物品的lore为这个
+        - '&f'
+        - '&7+ &e&l1 &r&e次神秘宝箱抽奖'
+        - '&f'
+        - '{item_statu}'
+  statu:
+    can_claim: '&a点击领取该奖励'
+    cannot_claim: '&c无法领取该奖励'
+    claimed: '&e已领取该奖励'
+database: # MySQL
+  address: '127.0.0.1:3306'
+  database: 数据库名
+  username: 用户名
+  password: 密码

@@ -1,0 +1,22 @@
+name: AerLevels
+version: 1.0.0
+main: com.aermini.aerlevels.AerLevels
+author: AerMini
+api-version: 1.8
+depend: [PlaceholderAPI]
+commands:
+  axp:
+    description: AerLevels 管理指令
+    usage: /<command> [参数]
+    permission: aerlevels.admin
+  orw:
+    description: 打开等级奖励菜单
+    usage: /<command>
+    permission: aerlevels.user.openreward
+permissions:
+  aerlevels.admin:
+    description: 管理权限
+    default: op
+  aerlevels.user.openreward:
+    description: 打开奖励菜单权限
+    default: true
