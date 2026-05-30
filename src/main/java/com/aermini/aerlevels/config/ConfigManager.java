@@ -162,4 +162,8 @@ public class ConfigManager {
     public String getMessageFail() {
         return getConfig().getString("message.fail", "&c等级不足,无法领取该奖励.");
     }
+
+    public String getMessageGetXP() {
+        return getConfig().getString("message.getxp", "&7恭喜你获得了&a{xp}&7点经验值!");
+    }
 }
