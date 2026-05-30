@@ -9,6 +9,12 @@ commands:
     description: AerLevels 管理指令
     usage: /<command> [参数]
     permission: aerlevels.admin
+  alevel:
+    permission: aerlevels.admin
+  aerlevels:
+    permission: aerlevels.admin
+  aerlevel:
+    permission: aerlevels.admin
   orw:
     description: 打开等级奖励菜单
     usage: /<command>

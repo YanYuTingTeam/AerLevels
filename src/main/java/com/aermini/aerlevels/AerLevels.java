@@ -32,6 +32,7 @@ public final class AerLevels extends JavaPlugin {
         getCommand("axp").setExecutor(new AerXPCommand(this));
         getCommand("aerlevels").setExecutor(new AerXPCommand(this));
         getCommand("alevel").setExecutor(new AerXPCommand(this));
+        getCommand("aerlevel").setExecutor(new AerXPCommand(this));
         getCommand("orw").setExecutor(new OpenRewardCommand(this));
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
         if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) { new AerLevelsExpansion(this).register(); }
