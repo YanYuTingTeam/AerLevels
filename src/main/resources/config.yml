@@ -95,3 +95,9 @@ database: # MySQL
   database: 数据库名
   username: 用户名
   password: 密码
+
+checkkick:
+  enabled: false
+  level: 2
+  message: "&b&l竞技场萌新保护>> &r&e您的等级太低，无法进入竞技场。请提高等级后再来吧！"
+  kick-message: "&b&l竞技场萌新保护>> &r&e您的等级太低，无法进入竞技场。请提高等级后再来吧！"

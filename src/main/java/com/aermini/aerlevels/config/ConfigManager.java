@@ -166,4 +166,20 @@ public class ConfigManager {
     public String getMessageGetXP() {
         return getConfig().getString("message.getxp", "&7恭喜你获得了&a{xp}&7点经验值!");
     }
+
+    public boolean isCheckKickEnabled() {
+    return getConfig().getBoolean("checkkick.enabled", false);
+    }
+
+    public int getCheckKickLevel() {
+        return getConfig().getInt("checkkick.level", 4);
+    }
+
+    public String getCheckMessage() {
+        return getConfig().getString("checkkick.message", "&c等级过低");
+    }
+
+    public String getCheckKickMessage() {
+        return getConfig().getString("checkkick.kick-message", "&c等级过低");
+    }
 }

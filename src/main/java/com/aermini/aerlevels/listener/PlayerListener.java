@@ -25,6 +25,21 @@ public class PlayerListener implements Listener {
         Player player = e.getPlayer();
         plugin.getMysqlManager().initPlayerData(player);
         ExperienceUtil.syncExpBar(player);
+
+        if (plugin.getConfigManager().isCheckKickEnabled()) {
+            int minLevel = plugin.getConfigManager().getCheckKickLevel();
+            int playerLevel = plugin.getMysqlManager().getPlayerLevel(player.getUniqueId());
+            if (playerLevel < minLevel && !player.isOp()) {
+                String kickMsg = plugin.getConfigManager().getCheckKickMessage();
+                kickMsg = kickMsg.replace("{level}", String.valueOf(minLevel))
+                         .replace("{player_level}", String.valueOf(playerLevel));
+                String msg = plugin.getConfigManager().getCheckKickMessage();
+                msg = msg.replace("{level}", String.valueOf(minLevel))
+                         .replace("{player_level}", String.valueOf(playerLevel));
+                player.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
+                player.kickPlayer(org.bukkit.ChatColor.translateAlternateColorCodes('&', kickMsg));
+            }
+        }
     }
 
     @EventHandler
