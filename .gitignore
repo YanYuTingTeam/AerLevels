@@ -1,0 +1,11 @@
+*.log
+*.err
+*.class
+*.zip
+target/
+build/
+*.iml
+.idea/
+.vscode/
+test/
+*.*~

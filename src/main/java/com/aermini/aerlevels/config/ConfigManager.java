@@ -62,6 +62,10 @@ public class ConfigManager {
         }
     }
 
+    public boolean isXPBarEnabled() {
+        return getConfig().getBoolean("main.xpbar", false);
+    }
+
     public int getMainLevelMin() {
         return getConfig().getInt("main.level_min", 1);
     }

@@ -51,6 +51,10 @@ public class ExperienceUtil {
             return;
         }
 
+        if (!plugin.getConfigManager().isXPBarEnabled()) {
+            return;
+        }
+
         java.util.UUID uuid = player.getUniqueId();
         int level = plugin.getMysqlManager().getPlayerLevel(uuid);
         double currentXP = plugin.getMysqlManager().getPlayerXP(uuid);
