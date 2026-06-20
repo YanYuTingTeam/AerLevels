@@ -29,26 +29,26 @@ levelup: # 升级配置
   doremove: true # 升级是否减少玩家经验.
 message:
   fail: "&c等级不足,无法领取该奖励."
-  getxp: "&7恭喜你获得了&a{xp}&7点经验值!"
+  getxp: "&7恭喜你获得了&a{xp}&7点经验值!" # none则不显示
 reward: # 奖励
   reward1: # 奖励名
     level: [-2] # 可领取该等级奖励的等级. [1,2,5] 代表当等级为1、2、5时可领取. [-1] 代表全部等级都是该奖励. [-2] 代表除最后1个等级外的所有等级. [-3] 代表除最后2个等级外的所有等级. 以此类推.
     cmd:
       - '[CMD_] aerlottry start YYT2025SERVER'
 rmenu: # 等级奖励菜单
-  # 在rmenu中有特定的占位文本. 其特定的占位文本只能在rmenu中使用，其他地方不可用; 而上述的占位文本依旧可以在rmenu中使用. 它们的关系堪比父类与子类的关系.
+  # 在rmenu中有特定的占位文本. 其特定的占位文本只能在rmenu中使用，其他地方不可用; 而上述的占位文本依旧可以在rmenu中使用.
   # 有以下特定占位文本:
   # {item_level} 在当页中某个mainreward物品对应的等级.
   # {item_statu} 对应的领取状态. 不同状态返回的值可在statu中进行配置.
   slot: 54 # 打开的等级奖励的菜单
   name: '等级奖励' # 等级奖励菜单的名字
   nextpage: # 下一页物品. 如果处于最后一页，则该物品不会被显示
-    slot: 41 # 处于的格子
+    slot: 50 # 处于的格子
     item: STONE_BUTTON
     name: '下一页'
     lore: '' # 可以有lore，也可以没有. 没有的时候甚至不用写 lore: 这一行.
   lastpage: # 上一页物品. 如果处于第一页，则该物品不会被显示
-    slot: 39 # 处于的格子
+    slot: 48 # 处于的格子
     item: STONE_BUTTON
     name: '上一页'
     lore: ''
@@ -92,14 +92,13 @@ rmenu: # 等级奖励菜单
     can_claim: '&a点击领取该奖励'
     cannot_claim: '&c无法领取该奖励'
     claimed: '&e已领取该奖励'
-database: # MySQL
-  address: '127.0.0.1:3306'
-  database: 数据库名
-  username: 用户名
-  password: 密码
-
 checkkick:
   enabled: false
   level: 2
   message: "&b&l竞技场萌新保护>> &r&e您的等级太低，无法进入竞技场。请提高等级后再来吧！"
   kick-message: "&b&l竞技场萌新保护>> &r&e您的等级太低，无法进入竞技场。请提高等级后再来吧！"
+database: # MySQL
+  address: '127.0.0.1:3306'
+  database: 数据库名
+  username: 用户名
+  password: 密码
