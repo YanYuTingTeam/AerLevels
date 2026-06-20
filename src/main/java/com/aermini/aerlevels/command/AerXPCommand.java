@@ -119,6 +119,7 @@ public class AerXPCommand implements CommandExecutor {
                 break;
 
             case "openreward":
+                if (!plugin.getConfigManager().isMenuEnabled()) return true;
                 new com.aermini.aerlevels.menu.RewardMenu(plugin).openMenu(target);
                 sender.sendMessage(org.bukkit.ChatColor.GREEN + "§a已为 " + playerName + " 打开等级奖励菜单");
                 break;

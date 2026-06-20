@@ -175,6 +175,10 @@ public class ConfigManager {
     return getConfig().getBoolean("checkkick.enabled", false);
     }
 
+    public boolean isMenuEnabled() {
+        return getConfig().getBoolean("main.menu", true);
+    }
+
     public int getCheckKickLevel() {
         return getConfig().getInt("checkkick.level", 4);
     }

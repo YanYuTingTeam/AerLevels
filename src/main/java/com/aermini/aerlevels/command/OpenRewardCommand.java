@@ -17,6 +17,7 @@ public class OpenRewardCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+        if (!plugin.getConfigManager().isMenuEnabled()) return true;
         if (!(sender instanceof Player)) {
             sender.sendMessage("§c只有玩家可以打开等级奖励菜单");
             return true;

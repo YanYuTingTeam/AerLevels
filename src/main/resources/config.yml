@@ -12,11 +12,12 @@
 # [CMD_] 以玩家身份执行后面的命令; [OPCMD_] 让玩家以管理员身份执行后面的命令; [CONSOLE_] 控制台执行命令
 
 main:
-  xpbar: false
+  menu: true # 允许打开等级奖励面板
+  xpbar: false # 等级同步至经验条
   level_min: 1 # 最小等级
   level_max: 100 # 最大等级. 当达到最大等级时, 升级所需经验就会显示为一个文本, 这个文本的内容在下一个参数中配置.
   max_format: 'MAX' # 必须是字符串. 比如 '999' 'a'. 此行为上方描述的最大等级升级所需经验的显示文本. 在那时, %axp_xp_tonext%的占位符中，返回的也是这个内容.
-  level_normal: 1
+  level_normal: 1 # 默认等级
 levelup: # 升级配置
   xp: '1250+750 *({level}-1)' # 每个等级的升级所需经验
   title: none # 升级显示文本; 若为none则不执行这个title.
