@@ -57,8 +57,8 @@ public class AerXPCommand implements CommandExecutor {
                     double xp = Double.parseDouble(args[2]);
                     plugin.getMysqlManager().addPlayerXP(uuid, xp);
                     String xpMsg = plugin.getConfigManager().getMessageGetXP();
-                    xpMsg = xpMsg.replace("{xp}", String.valueOf((int) xp));
-                    target.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', xpMsg));
+                    if (!xpMsg.equals("none")) {xpMsg = xpMsg.replace("{xp}", String.valueOf((int) xp));
+                    target.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', xpMsg));}
                     sender.sendMessage("§a已给 " + playerName + " 添加 " + xp + " 经验");
                 } catch (NumberFormatException e) {
                     sender.sendMessage("§c经验值类型错误");
