@@ -24,28 +24,6 @@ public class ExperienceUtil {
         return playerXP >= calculateXPToNextLevel(playerLevel);
     }
 
-    public static void addPlayerXP(java.util.UUID playerUUID, double addXP) {
-        if (addXP < 0) {
-            return;
-        }
-
-        int currentLevel = plugin.getMysqlManager().getPlayerLevel(playerUUID);
-        double currentXP = plugin.getMysqlManager().getPlayerXP(playerUUID);
-        double newXP = currentXP + addXP;
-        while (canLevelUp(currentLevel, newXP)) {
-            double xpNeeded = calculateXPToNextLevel(currentLevel);
-            newXP -= xpNeeded;
-            currentLevel += 1;
-            if (currentLevel >= plugin.getConfigManager().getMainLevelMax()) {
-                newXP = 0.0;
-                break;
-            }
-        }
-
-        plugin.getMysqlManager().setPlayerLevel(playerUUID, currentLevel);
-        plugin.getMysqlManager().setPlayerXP(playerUUID, newXP);
-    }
-
     public static void syncExpBar(Player player) {
         if (player == null || !player.isOnline()) {
             return;

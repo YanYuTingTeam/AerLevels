@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -53,6 +54,9 @@ public class RewardMenu {
         playerPages.put(uuid, page);
     }
 
+    public static void removePlayer(UUID uuid) {
+        playerPages.remove(uuid);
+    }
     private void fillBackground(Inventory inventory) {
         String itemName = plugin.getConfigManager().getConfig().getString("rmenu.fills.item", "GRAY");
         String displayName = plugin.getConfigManager().getConfig().getString("rmenu.fills.name", "&f");
@@ -136,6 +140,8 @@ public class RewardMenu {
         List<Integer> slots = plugin.getConfigManager().getConfig().getIntegerList("rmenu.mainreward.slot");
         int startIndex = (page - 1) * slots.size();
         String displayName = plugin.getConfigManager().getConfig().getString("rmenu.fills.name", "&f");
+        int playerLevel = plugin.getMysqlManager().getPlayerLevel(player.getUniqueId());
+        Set<Integer> claimedRewards = plugin.getMysqlManager().getClaimedRewards(player.getUniqueId());
         for (int i = 0; i < slots.size(); i++) {
             int slot = slots.get(i);
             int levelIndex = startIndex + i;
@@ -149,18 +155,18 @@ public class RewardMenu {
             }
             
             int level = levelList.get(levelIndex);
-            ItemStack rewardItem = createRewardItem(player, level);
+            ItemStack rewardItem = createRewardItem(playerLevel, claimedRewards, level);
             inventory.setItem(slot, rewardItem);
         }
     }
-    private ItemStack createRewardItem(Player player, int level) {
+
+    private ItemStack createRewardItem(int playerLevel, Set<Integer> claimedRewards, int level) {
         String defaultItem = plugin.getConfigManager().getConfig().getString("rmenu.mainreward.item", "MILK_BUCKET");
         String clickItem = plugin.getConfigManager().getConfig().getString("rmenu.mainreward.click", "BUCKET");
         String displayName = plugin.getConfigManager().getConfig().getString("rmenu.mainreward.name", "&7&l等级奖励&r&f-&a&llv{item_level}");
         List<String> defaultLore = plugin.getConfigManager().getConfig().getStringList("rmenu.mainreward.lore");
-        boolean canClaim = plugin.getMysqlManager().getPlayerLevel(player.getUniqueId()) >= level 
-                && !plugin.getMysqlManager().isRewardClaimed(player.getUniqueId(), level);
-        boolean claimed = plugin.getMysqlManager().isRewardClaimed(player.getUniqueId(), level);
+        boolean canClaim = playerLevel >= level && !claimedRewards.contains(level);
+        boolean claimed = claimedRewards.contains(level);
         ItemStack item;
         List<String> lore;
         boolean glow;

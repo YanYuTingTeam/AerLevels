@@ -1,6 +1,7 @@
 package com.aermini.aerlevels.listener;
 
 import com.aermini.aerlevels.AerLevels;
+import com.aermini.aerlevels.menu.RewardMenu;
 import com.aermini.aerlevels.util.ExperienceUtil;
 import java.util.ArrayList;
 import java.util.List;
@@ -10,6 +11,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -23,23 +25,27 @@ public class PlayerListener implements Listener {
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent e) {
         Player player = e.getPlayer();
-        plugin.getMysqlManager().initPlayerData(player);
-        ExperienceUtil.syncExpBar(player);
 
-        if (plugin.getConfigManager().isCheckKickEnabled()) {
-            int minLevel = plugin.getConfigManager().getCheckKickLevel();
-            int playerLevel = plugin.getMysqlManager().getPlayerLevel(player.getUniqueId());
-            if (playerLevel < minLevel && !player.isOp()) {
-                String kickMsg = plugin.getConfigManager().getCheckKickMessage();
-                kickMsg = kickMsg.replace("{level}", String.valueOf(minLevel))
-                         .replace("{player_level}", String.valueOf(playerLevel));
-                String msg = plugin.getConfigManager().getCheckKickMessage();
-                msg = msg.replace("{level}", String.valueOf(minLevel))
-                         .replace("{player_level}", String.valueOf(playerLevel));
-                player.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
-                player.kickPlayer(org.bukkit.ChatColor.translateAlternateColorCodes('&', kickMsg));
+        plugin.getMysqlManager().initPlayerDataAsync(player, () -> {
+            ExperienceUtil.syncExpBar(player);
+
+            if (plugin.getConfigManager().isCheckKickEnabled()) {
+                int minLevel = plugin.getConfigManager().getCheckKickLevel();
+                int playerLevel = plugin.getMysqlManager().getPlayerLevel(player.getUniqueId());
+                if (playerLevel < minLevel && !player.isOp()) {
+                    String kickMsg = plugin.getConfigManager().getCheckKickMessage();
+                    kickMsg = kickMsg.replace("{level}", String.valueOf(minLevel))
+                             .replace("{player_level}", String.valueOf(playerLevel));
+                    player.kickPlayer(org.bukkit.ChatColor.translateAlternateColorCodes('&', kickMsg));
+                }
             }
-        }
+        });
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent e) {
+        plugin.getMysqlManager().removePlayerCache(e.getPlayer().getUniqueId());
+        RewardMenu.removePlayer(e.getPlayer().getUniqueId());
     }
 
     @EventHandler
@@ -194,9 +200,12 @@ public class PlayerListener implements Listener {
         } else if (cmd.startsWith("[OPCMD_]")) {
             String actualCmd = cmd.substring("[OPCMD_]".length()).trim();
             boolean isOp = player.isOp();
-            player.setOp(true);
-            player.performCommand(actualCmd);
-            player.setOp(isOp);
+            try {
+                player.setOp(true);
+                player.performCommand(actualCmd);
+            } finally {
+                player.setOp(isOp);
+            }
         } else if (cmd.startsWith("[CONSOLE_]")) {
             String actualCmd = cmd.substring("[CONSOLE_]".length()).trim();
             plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), actualCmd);

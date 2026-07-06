@@ -2,26 +2,54 @@ package com.aermini.aerlevels.database;
 
 import com.aermini.aerlevels.AerLevels;
 import com.aermini.aerlevels.util.ExperienceUtil;
-import com.connorlinfoot.titleapi.TitleAPI;
-import org.apache.commons.jexl3.JexlEngine;
 import com.aermini.aerlevels.util.PlaceholderUtil;
-import org.bukkit.entity.Player;
+import com.connorlinfoot.titleapi.TitleAPI;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import org.apache.commons.jexl3.JexlBuilder;
 import org.apache.commons.jexl3.JexlContext;
+import org.apache.commons.jexl3.JexlEngine;
 import org.apache.commons.jexl3.JexlExpression;
 import org.apache.commons.jexl3.MapContext;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+
 import java.sql.*;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 // 这个数据库是AI写的.
 public class MySQLManager {
     private final AerLevels plugin;
-    private Connection connection;
+    private HikariDataSource dataSource;
     private int heartbeatTaskId = -1;
     private String address;
     private String database;
     private String username;
     private String password;
+
+    private static final ConcurrentHashMap<UUID, CachedPlayerData> playerCache = new ConcurrentHashMap<>();
+
+    public static class CachedPlayerData {
+        public volatile int level;
+        public volatile double xp;
+        public volatile Set<Integer> claimedRewards;
+        public volatile boolean fullyLoaded;
+
+        public CachedPlayerData(int level, double xp) {
+            this.level = level;
+            this.xp = xp;
+            this.claimedRewards = new HashSet<>();
+            this.fullyLoaded = false;
+        }
+    }
+
+    private JexlEngine jexlEngine;
+    private JexlExpression cachedJexlExpression;
+    private String cachedFormulaStr;
+
     public MySQLManager(AerLevels plugin) {
         this.plugin = plugin;
         loadDatabaseConfig();
@@ -35,19 +63,33 @@ public class MySQLManager {
     }
 
     public void connect() throws SQLException {
-        if (connection != null && !connection.isClosed()) {
+        if (dataSource != null && !dataSource.isClosed()) {
             return;
         }
-        String url = "jdbc:mysql://" + address + "/" + database + "?useSSL=false&characterEncoding=utf8&serverTimezone=UTC&autoReconnect=true&maxReconnects=3&connectTimeout=10000";
-        connection = DriverManager.getConnection(url, username, password);
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:mysql://" + address + "/" + database
+                + "?useSSL=false&characterEncoding=utf8&serverTimezone=UTC");
+        config.setUsername(username);
+        config.setPassword(password);
+        config.setMaximumPoolSize(10);
+        config.setMinimumIdle(2);
+        config.setConnectionTimeout(10000);
+        config.setIdleTimeout(300000);
+        config.setMaxLifetime(600000);
+        config.setPoolName("AerLevels-Pool");
+        dataSource = new HikariDataSource(config);
+        jexlEngine = new JexlBuilder().create();
+        cachedJexlExpression = null;
+        cachedFormulaStr = null;
+
         startHeartbeat();
     }
 
     public void disconnect() throws SQLException {
         stopHeartbeat();
-        if (connection != null && !connection.isClosed()) {
-            connection.close();
-            plugin.getLogger().info("MySQL 数据库连接已断开");
+        if (dataSource != null && !dataSource.isClosed()) {
+            dataSource.close();
+            plugin.getLogger().info("MySQL 连接池已关闭");
         }
     }
 
@@ -55,15 +97,11 @@ public class MySQLManager {
         if (heartbeatTaskId != -1) {
             return;
         }
-
         heartbeatTaskId = plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, () -> {
-            try {
-                if (connection != null && !connection.isClosed()) {
-                    try (Statement stmt = connection.createStatement()) {
-                        stmt.execute("SELECT 1");
-                    }
-                }
-            } catch (SQLException e) {
+            try (Connection conn = dataSource.getConnection();
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("SELECT 1");
+            } catch (Exception e) {
                 plugin.getLogger().warning("数据库心跳失败：" + e.getMessage());
             }
         }, 20L * 60 * 5, 20L * 60 * 5).getTaskId();
@@ -76,69 +114,143 @@ public class MySQLManager {
         }
     }
 
-    private Connection getConnection() throws SQLException {
-        if (connection == null || connection.isClosed()) {
-            plugin.getLogger().warning("数据库连接已断开，正在重新连接...");
-            connect();
-        }
-        try {
-            if (!connection.isValid(3)) {
-                plugin.getLogger().warning("数据库连接无效，正在重新连接...");
-                connection.close();
-                connect();
-            }
-        } catch (SQLException e) {
-            plugin.getLogger().warning("数据库连接验证失败，正在重新连接..." + e.getMessage());
-            try {
-                if (connection != null) {
-                    connection.close();
-                }
-            } catch (SQLException ignored) {
-            }
-            connect();
-        }
-
-        return connection;
-    }
-
     public void createTables() throws SQLException {
-        String sql = "CREATE TABLE IF NOT EXISTS aerlevels_data (" +
-                "uuid VARCHAR(36) PRIMARY KEY," +
-                "player_name VARCHAR(16) NOT NULL," +
-                "level INT NOT NULL," +
-                "xp DOUBLE NOT NULL," +
-                "claimed_rewards TEXT" +
-                ") CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;";
-        try (Statement stmt = getConnection().createStatement()) {
-            stmt.execute(sql);
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE IF NOT EXISTS aerlevels_data (" +
+                    "uuid VARCHAR(36) PRIMARY KEY," +
+                    "player_name VARCHAR(16) NOT NULL," +
+                    "level INT NOT NULL," +
+                    "xp DOUBLE NOT NULL" +
+                    ") CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;");
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS aerlevels_claimed (" +
+                    "uuid VARCHAR(36) NOT NULL," +
+                    "level INT NOT NULL," +
+                    "PRIMARY KEY (uuid, level)" +
+                    ") CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;");
+            migrateClaimedRewards(conn);
         }
     }
 
-    public void initPlayerData(Player player) {
+    private void migrateClaimedRewards(Connection conn) {
+        try {
+            boolean hasOldColumn = false;
+            try (ResultSet rs = conn.getMetaData().getColumns(null, null, "aerlevels_data", "claimed_rewards")) {
+                hasOldColumn = rs.next();
+            }
+            if (!hasOldColumn) return;
+
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                         "SELECT uuid, claimed_rewards FROM aerlevels_data " +
+                         "WHERE claimed_rewards IS NOT NULL AND claimed_rewards != ''")) {
+                while (rs.next()) {
+                    String uuid = rs.getString("uuid");
+                    String claimed = rs.getString("claimed_rewards");
+                    if (claimed == null || claimed.isEmpty()) continue;
+
+                    String[] parts = claimed.split(",");
+                    try (PreparedStatement pstmt = conn.prepareStatement(
+                            "INSERT IGNORE INTO aerlevels_claimed (uuid, level) VALUES (?, ?)")) {
+                        for (String part : parts) {
+                            part = part.trim();
+                            if (part.isEmpty()) continue;
+                            try {
+                                int lvl = Integer.parseInt(part);
+                                pstmt.setString(1, uuid);
+                                pstmt.setInt(2, lvl);
+                                pstmt.executeUpdate();
+                            } catch (NumberFormatException ignored) {
+                            }
+                        }
+                    }
+                }
+            }
+
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("ALTER TABLE aerlevels_data DROP COLUMN claimed_rewards");
+            }
+            plugin.getLogger().info("claimed_rewards 迁移完成，旧列已删除");
+        } catch (SQLException e) {
+            plugin.getLogger().warning("迁移 claimed_rewards 时出错（可手动处理）：" + e.getMessage());
+        }
+    }
+
+    public void removePlayerCache(UUID uuid) {
+        playerCache.remove(uuid);
+    }
+
+    public void initPlayerDataAsync(Player player, Runnable onComplete) {
         UUID uuid = player.getUniqueId();
-        if (!hasPlayerData(uuid)) {
-            int defaultLevel = plugin.getConfigManager().getMainLevelNormal();
-            try (PreparedStatement pstmt = getConnection().prepareStatement(
-                    "INSERT INTO aerlevels_data (uuid, player_name, level, xp, claimed_rewards) VALUES (?, ?, ?, ?, ?)")) {
-                pstmt.setString(1, uuid.toString());
-                pstmt.setString(2, player.getName());
-                pstmt.setInt(3, defaultLevel);
-                pstmt.setDouble(4, 0.0);
-                pstmt.setString(5, "");
-                pstmt.executeUpdate();
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try (Connection conn = dataSource.getConnection()) {
+                // 不存在则插入（INSERT IGNORE 幂等）
+                try (PreparedStatement checkStmt = conn.prepareStatement(
+                        "SELECT 1 FROM aerlevels_data WHERE uuid = ?")) {
+                    checkStmt.setString(1, uuid.toString());
+                    if (!checkStmt.executeQuery().next()) {
+                        int defaultLevel = plugin.getConfigManager().getMainLevelNormal();
+                        try (PreparedStatement insertStmt = conn.prepareStatement(
+                                "INSERT INTO aerlevels_data (uuid, player_name, level, xp) VALUES (?, ?, ?, ?)")) {
+                            insertStmt.setString(1, uuid.toString());
+                            insertStmt.setString(2, player.getName());
+                            insertStmt.setInt(3, defaultLevel);
+                            insertStmt.setDouble(4, 0.0);
+                            insertStmt.executeUpdate();
+                        }
+                    }
+                }
+
+                loadPlayerDataToCache(conn, uuid);
+
+                if (onComplete != null) {
+                    Bukkit.getScheduler().runTask(plugin, onComplete);
+                }
             } catch (SQLException e) {
                 plugin.getLogger().severe("初始化玩家数据失败：" + e.getMessage());
+            }
+        });
+    }
+
+    private void loadPlayerDataToCache(Connection conn, UUID uuid) throws SQLException {
+        try (PreparedStatement pstmt = conn.prepareStatement(
+                "SELECT level, xp FROM aerlevels_data WHERE uuid = ?")) {
+            pstmt.setString(1, uuid.toString());
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    CachedPlayerData data = new CachedPlayerData(
+                            rs.getInt("level"),
+                            rs.getDouble("xp")
+                    );
+                    data.claimedRewards = new HashSet<>();
+                    // 一次性加载已领取奖励
+                    try (PreparedStatement pstmt2 = conn.prepareStatement(
+                            "SELECT level FROM aerlevels_claimed WHERE uuid = ?")) {
+                        pstmt2.setString(1, uuid.toString());
+                        try (ResultSet rs2 = pstmt2.executeQuery()) {
+                            while (rs2.next()) {
+                                data.claimedRewards.add(rs2.getInt("level"));
+                            }
+                        }
+                    }
+                    data.fullyLoaded = true;
+                    playerCache.put(uuid, data);
+                }
             }
         }
     }
 
     public boolean hasPlayerData(UUID uuid) {
-        try (PreparedStatement pstmt = getConnection().prepareStatement(
-                "SELECT 1 FROM aerlevels_data WHERE uuid = ?")) {
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null && data.fullyLoaded) {
+            return true;
+        }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "SELECT 1 FROM aerlevels_data WHERE uuid = ?")) {
             pstmt.setString(1, uuid.toString());
-            try (ResultSet rs = pstmt.executeQuery()) {
-                return rs.next();
-            }
+            return pstmt.executeQuery().next();
         } catch (SQLException e) {
             plugin.getLogger().severe("检查玩家数据失败：" + e.getMessage());
             return false;
@@ -146,8 +258,14 @@ public class MySQLManager {
     }
 
     public int getPlayerLevel(UUID uuid) {
-        try (PreparedStatement pstmt = getConnection().prepareStatement(
-                "SELECT level FROM aerlevels_data WHERE uuid = ?")) {
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null) {
+            return data.level;
+        }
+        // 缓存未命中
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "SELECT level FROM aerlevels_data WHERE uuid = ?")) {
             pstmt.setString(1, uuid.toString());
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
@@ -160,40 +278,14 @@ public class MySQLManager {
         return plugin.getConfigManager().getMainLevelMin();
     }
 
-    public void setPlayerLevel(UUID uuid, int level) {
-        if (!hasPlayerData(uuid)) {
-            int defaultLevel = plugin.getConfigManager().getMainLevelNormal();
-            try (PreparedStatement pstmt = getConnection().prepareStatement(
-                    "INSERT INTO aerlevels_data (uuid, player_name, level, xp, claimed_rewards) VALUES (?, ?, ?, ?, ?)")) {
-                pstmt.setString(1, uuid.toString());
-                pstmt.setString(2, "Unknown");
-                pstmt.setInt(3, defaultLevel);
-                pstmt.setDouble(4, 0.0);
-                pstmt.setString(5, "");
-                pstmt.executeUpdate();
-            } catch (SQLException e) {
-                plugin.getLogger().severe("初始化玩家数据失败：" + e.getMessage());
-                return;
-            }
-        }
-
-        int maxLevel = plugin.getConfigManager().getMainLevelMax();
-        int minLevel = plugin.getConfigManager().getMainLevelMin();
-        level = Math.max(minLevel, Math.min(maxLevel, level));
-        try (PreparedStatement pstmt = getConnection().prepareStatement(
-                "UPDATE aerlevels_data SET level = ? WHERE uuid = ?")) {
-            pstmt.setInt(1, level);
-            pstmt.setString(2, uuid.toString());
-            pstmt.executeUpdate();
-        } catch (SQLException e) {
-            plugin.getLogger().severe("设置玩家等级失败：" + e.getMessage());
-        }
-        ExperienceUtil.syncExpBar(uuid);
-    }
-
     public double getPlayerXP(UUID uuid) {
-        try (PreparedStatement pstmt = getConnection().prepareStatement(
-                "SELECT xp FROM aerlevels_data WHERE uuid = ?")) {
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null) {
+            return data.xp;
+        }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "SELECT xp FROM aerlevels_data WHERE uuid = ?")) {
             pstmt.setString(1, uuid.toString());
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
@@ -206,63 +298,186 @@ public class MySQLManager {
         return 0.0;
     }
 
-    public void setPlayerXP(UUID uuid, double xp) {
-        if (!hasPlayerData(uuid)) {
-            int defaultLevel = plugin.getConfigManager().getMainLevelNormal();
-            try (PreparedStatement pstmt = getConnection().prepareStatement(
-                    "INSERT INTO aerlevels_data (uuid, player_name, level, xp, claimed_rewards) VALUES (?, ?, ?, ?, ?)")) {
-                pstmt.setString(1, uuid.toString());
-                pstmt.setString(2, "Unknown");
-                pstmt.setInt(3, defaultLevel);
-                pstmt.setDouble(4, 0.0);
-                pstmt.setString(5, "");
-                pstmt.executeUpdate();
-            } catch (SQLException e) {
-                plugin.getLogger().severe("初始化玩家数据失败：" + e.getMessage());
-                return;
+    public Set<Integer> getClaimedRewards(UUID uuid) {
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null && data.claimedRewards != null) {
+            return new HashSet<>(data.claimedRewards);
+        }
+        Set<Integer> claimed = new HashSet<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "SELECT level FROM aerlevels_claimed WHERE uuid = ?")) {
+            pstmt.setString(1, uuid.toString());
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    claimed.add(rs.getInt("level"));
+                }
             }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("获取已领取奖励列表失败：" + e.getMessage());
+        }
+        if (data != null) {
+            data.claimedRewards = claimed;
+        }
+        return claimed;
+    }
+
+    public void setPlayerLevel(UUID uuid, int level) {
+        int maxLevel = plugin.getConfigManager().getMainLevelMax();
+        int minLevel = plugin.getConfigManager().getMainLevelMin();
+        level = Math.max(minLevel, Math.min(maxLevel, level));
+
+        ensurePlayerDataAsync(uuid, "Unknown");
+
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null) {
+            data.level = level;
         }
 
+        final int fLevel = level;
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(
+                         "UPDATE aerlevels_data SET level = ? WHERE uuid = ?")) {
+                pstmt.setInt(1, fLevel);
+                pstmt.setString(2, uuid.toString());
+                pstmt.executeUpdate();
+            } catch (SQLException e) {
+                plugin.getLogger().severe("设置玩家等级失败：" + e.getMessage());
+            }
+        });
+
+        ExperienceUtil.syncExpBar(uuid);
+    }
+
+    public void setPlayerXP(UUID uuid, double xp) {
         xp = Math.max(0, xp);
-        try (PreparedStatement pstmt = getConnection().prepareStatement(
-                "UPDATE aerlevels_data SET xp = ? WHERE uuid = ?")) {
-            pstmt.setDouble(1, xp);
-            pstmt.setString(2, uuid.toString());
-            pstmt.executeUpdate();
-        } catch (SQLException e) {
-            plugin.getLogger().severe("设置玩家经验失败：" + e.getMessage());
+        ensurePlayerDataAsync(uuid, "Unknown");
+
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null) {
+            data.xp = xp;
         }
+
+        final double fXP = xp;
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(
+                         "UPDATE aerlevels_data SET xp = ? WHERE uuid = ?")) {
+                pstmt.setDouble(1, fXP);
+                pstmt.setString(2, uuid.toString());
+                pstmt.executeUpdate();
+            } catch (SQLException e) {
+                plugin.getLogger().severe("设置玩家经验失败：" + e.getMessage());
+            }
+        });
 
         ExperienceUtil.syncExpBar(uuid);
     }
 
     public void addPlayerXP(UUID uuid, double xp) {
-        int startLevel = getPlayerLevel(uuid);
-        double currentXP = getPlayerXP(uuid);
-        setPlayerXP(uuid, currentXP + xp);
-        while (checkLevelUp(uuid)) {
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data == null) {
+            plugin.getLogger().warning("addPlayerXP: 玩家数据未加载到缓存，跳过");
+            return;
         }
-        int finalLevel = getPlayerLevel(uuid);
-        if (finalLevel > startLevel) {
-            sendLevelUpMessage(uuid, finalLevel);
+
+        int startLevel = data.level;
+        double currentXP = data.xp;
+        double newXP = currentXP + xp;
+        int newLevel = startLevel;
+        int maxLevel = plugin.getConfigManager().getMainLevelMax();
+        boolean doRemove = plugin.getConfigManager().isDoRemoveXP();
+        boolean doReset = plugin.getConfigManager().isDoResetXP();
+
+        // 纯内存计算升级
+        while (newXP >= calculateXPNeeded(newLevel) && newLevel < maxLevel) {
+            double needed = calculateXPNeeded(newLevel);
+            if (doRemove) {
+                newXP -= needed;
+            } else if (doReset) {
+                newXP = plugin.getConfigManager().getResetXPValue();
+            }
+            newLevel++;
+            if (newLevel >= maxLevel) {
+                newXP = 0;
+                break;
+            }
         }
+
+        data.level = newLevel;
+        data.xp = newXP;
+        final int fLevel = newLevel;
+        final double fXP = newXP;
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(
+                         "UPDATE aerlevels_data SET level = ?, xp = ? WHERE uuid = ?")) {
+                pstmt.setInt(1, fLevel);
+                pstmt.setDouble(2, fXP);
+                pstmt.setString(3, uuid.toString());
+                pstmt.executeUpdate();
+            } catch (SQLException e) {
+                plugin.getLogger().severe("持久化玩家数据失败：" + e.getMessage());
+            }
+        });
+
+        if (fLevel > startLevel) {
+            sendLevelUpMessage(uuid, fLevel);
+        }
+
         ExperienceUtil.syncExpBar(uuid);
     }
 
-    private boolean checkLevelUp(UUID uuid) {
-        int currentLevel = getPlayerLevel(uuid);
-        double currentXP = getPlayerXP(uuid);
-        double xpNeeded = calculateXPNeeded(currentLevel);
-        if (currentXP >= xpNeeded && currentLevel < plugin.getConfigManager().getMainLevelMax()) {
-            setPlayerLevel(uuid, currentLevel + 1);
-            boolean doRemove = plugin.getConfigManager().isDoRemoveXP();
-            boolean doReset = plugin.getConfigManager().isDoResetXP();
-            if (doRemove) {
-                setPlayerXP(uuid, currentXP - xpNeeded);
-            } else if (doReset) {
-                setPlayerXP(uuid, plugin.getConfigManager().getResetXPValue());
+    private void ensurePlayerDataAsync(UUID uuid, String playerName) {
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(
+                         "INSERT IGNORE INTO aerlevels_data (uuid, player_name, level, xp) VALUES (?, ?, ?, ?)")) {
+                int defaultLevel = plugin.getConfigManager().getMainLevelNormal();
+                pstmt.setString(1, uuid.toString());
+                pstmt.setString(2, playerName);
+                pstmt.setInt(3, defaultLevel);
+                pstmt.setDouble(4, 0.0);
+                pstmt.executeUpdate();
+            } catch (SQLException e) {
+                plugin.getLogger().severe("确保玩家数据存在失败：" + e.getMessage());
             }
-            return true;
+        });
+    }
+
+    public void markRewardClaimed(UUID uuid, int level) {
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null && data.claimedRewards != null) {
+            data.claimedRewards.add(level);
+        }
+
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(
+                         "INSERT IGNORE INTO aerlevels_claimed (uuid, level) VALUES (?, ?)")) {
+                pstmt.setString(1, uuid.toString());
+                pstmt.setInt(2, level);
+                pstmt.executeUpdate();
+            } catch (SQLException e) {
+                plugin.getLogger().severe("标记奖励已领取失败：" + e.getMessage());
+            }
+        });
+    }
+
+    public boolean isRewardClaimed(UUID uuid, int level) {
+        CachedPlayerData data = playerCache.get(uuid);
+        if (data != null && data.claimedRewards != null) {
+            return data.claimedRewards.contains(level);
+        }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "SELECT 1 FROM aerlevels_claimed WHERE uuid = ? AND level = ?")) {
+            pstmt.setString(1, uuid.toString());
+            pstmt.setInt(2, level);
+            return pstmt.executeQuery().next();
+        } catch (SQLException e) {
+            plugin.getLogger().severe("检查奖励是否已领取失败：" + e.getMessage());
         }
         return false;
     }
@@ -275,25 +490,31 @@ public class MySQLManager {
         }
 
         String cleanedFormula = rawFormula.replaceAll("\\{(\\w+)\\}", "$1");
-        JexlEngine jexl = new JexlBuilder().create();
         try {
+            // 公式未变则复用已编译的表达式
+            if (!cleanedFormula.equals(cachedFormulaStr) || cachedJexlExpression == null) {
+                cachedJexlExpression = jexlEngine.createExpression(cleanedFormula);
+                cachedFormulaStr = cleanedFormula;
+            }
+
             JexlContext context = new MapContext();
             context.set("level", level);
-            JexlExpression expression = jexl.createExpression(cleanedFormula);
-            Object result = expression.evaluate(context);
+            Object result = cachedJexlExpression.evaluate(context);
             if (result instanceof Number) {
-                double xpNeeded = ((Number) result).doubleValue();
-                return Math.max(0.0, xpNeeded);
+                return Math.max(0.0, ((Number) result).doubleValue());
             } else {
                 plugin.getLogger().severe("经验公式计算结果不是数字！公式：" + rawFormula + " 等级：" + level);
                 return 1000.0;
             }
-
         } catch (Exception e) {
             plugin.getLogger().severe("计算升级经验失败！公式：" + rawFormula + " 等级：" + level + " 错误：" + e.getMessage());
-            e.printStackTrace();
             return 1000.0;
         }
+    }
+
+    public void clearJexlCache() {
+        cachedJexlExpression = null;
+        cachedFormulaStr = null;
     }
 
     private void sendLevelUpMessage(UUID uuid, int newLevel) {
@@ -313,9 +534,9 @@ public class MySQLManager {
         title = PlaceholderUtil.parsePlaceholders(player, parseLevelUpPlaceholders(player, newLevel, currentXP, xpToNext, xpNext, levelNext, levelLast, title));
         subtitle = PlaceholderUtil.parsePlaceholders(player, parseLevelUpPlaceholders(player, newLevel, currentXP, xpToNext, xpNext, levelNext, levelLast, subtitle));
         rawMessage = PlaceholderUtil.parsePlaceholders(player, parseLevelUpPlaceholders(player, newLevel, currentXP, xpToNext, xpNext, levelNext, levelLast, rawMessage));
-        title = title != null ? title.replace('&', '§') : "";
-        subtitle = subtitle != null ? subtitle.replace('&', '§') : "";
-        rawMessage = rawMessage != null ? rawMessage.replace('&', '§') : "";
+        title = title != null ? title.replace('&', '\u00a7') : "";
+        subtitle = subtitle != null ? subtitle.replace('&', '\u00a7') : "";
+        rawMessage = rawMessage != null ? rawMessage.replace('&', '\u00a7') : "";
         if (title != null && !title.equals("none") && subtitle != null && !subtitle.equals("none")) {
             TitleAPI.sendTitle(player, 20, 40, 20, title, subtitle);
         }
@@ -345,34 +566,5 @@ public class MySQLManager {
             text = text.replace("{xp_next}", maxFormat);
         }
         return text;
-    }
-
-    public void markRewardClaimed(UUID uuid, int level) {
-        try (PreparedStatement pstmt = getConnection().prepareStatement(
-                "UPDATE aerlevels_data SET claimed_rewards = CONCAT(IFNULL(claimed_rewards, ''), ?, ',') WHERE uuid = ?")) {
-            pstmt.setString(1, String.valueOf(level));
-            pstmt.setString(2, uuid.toString());
-            pstmt.executeUpdate();
-        } catch (SQLException e) {
-            plugin.getLogger().severe("标记奖励已领取失败：" + e.getMessage());
-        }
-    }
-
-    public boolean isRewardClaimed(UUID uuid, int level) {
-        try (PreparedStatement pstmt = getConnection().prepareStatement(
-                "SELECT claimed_rewards FROM aerlevels_data WHERE uuid = ?")) {
-            pstmt.setString(1, uuid.toString());
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    String claimed = rs.getString("claimed_rewards");
-                    return claimed != null && (claimed.contains("," + level + ",")
-                            || claimed.startsWith(level + ",")
-                            || claimed.endsWith("," + level));
-                }
-            }
-        } catch (SQLException e) {
-            plugin.getLogger().severe("检查奖励是否已领取失败：" + e.getMessage());
-        }
-        return false;
     }
 }

@@ -22,6 +22,7 @@ public class AerXPCommand implements CommandExecutor {
 
         if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
             plugin.getConfigManager().reloadConfig();
+            plugin.getMysqlManager().clearJexlCache();
             sender.sendMessage(org.bukkit.ChatColor.GREEN + "插件配置已重载！");
             return true;
         }

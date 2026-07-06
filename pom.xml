@@ -75,6 +75,12 @@
             <version>24.0.1</version>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>4.0.3</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -111,6 +117,8 @@
                                     <include>org.apache.commons:commons-jexl3</include>
                                     <include>mysql:mysql-connector-java</include>
                                     <include>org.jetbrains:annotations</include>
+                                    <include>com.zaxxer:HikariCP</include>
+                                    <include>org.slf4j:slf4j-api</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
@@ -125,6 +133,14 @@
                                 <relocation>
                                     <pattern>org.apache.commons.jexl3</pattern>
                                     <shadedPattern>com.aermini.aerlevels.libs.jexl</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.zaxxer.hikari</pattern>
+                                    <shadedPattern>com.aermini.aerlevels.libs.hikari</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.slf4j</pattern>
+                                    <shadedPattern>com.aermini.aerlevels.libs.slf4j</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>
